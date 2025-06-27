@@ -166,75 +166,6 @@ regression_df <- purrr::map_df(
   ~get_volume_estimates_for_length(.x, all_transects, L_PER_TRANSECT)
 )
 
-# 2. Plotting the Regressions
-
-# --- Linear Model ---
-lm_model <- lm(volume_m3_ha ~ total_length_m, data = regression_df)
-lm_summary <- summary(lm_model)
-p_value_lm <- lm_summary$coefficients[2, 4]
-r_squared_lm <- lm_summary$r.squared
-
-# Plot 1: Linear Model with Confidence Interval
-lr_plot <- ggplot(regression_df, aes(x = total_length_m, y = volume_m3_ha)) +
-  geom_point(alpha = 0.2) +
-  geom_smooth(method = "lm", aes(color = "Linear Model"), se = TRUE) +
-  geom_hline(aes(yintercept = ref_vol_m3_ha, linetype = "Reference"), color = "#004d00") +
-  labs(
-    title = "Regression of Volume Estimate vs. Transect Length",
-    subtitle = "Linear Model with 95% confidence interval",
-    x = "Total Transect Length (m)",
-    y = "Estimated Volume (m³/ha)"
-  ) +
-  scale_color_manual(
-    name = "Regression Method",
-    values = c("Linear Model" = "blue"),
-    labels = c(sprintf("Linear Model (R² = %.2f, p = %.3g)", r_squared_lm, p_value_lm))
-  ) +
-  scale_linetype_manual(
-    name = "",
-    values = c("Reference" = "dashed"),
-    labels = c(sprintf("Reference: %.2f m³/ha", ref_vol_m3_ha))
-  ) +
-  theme_bw() +
-  theme(legend.position = "bottom", legend.box = "vertical")
-
-ggsave("regression_lm.png", lr_plot, width = 8, height = 6)
-
-# --- LOESS Model ---
-# Note: LOESS is non-parametric, so traditional p-values are not applicable.
-# We calculate a pseudo R-squared for goodness of fit.
-loess_model <- loess(volume_m3_ha ~ total_length_m, data = regression_df)
-predictions <- predict(loess_model, newdata = regression_df)
-TSS <- sum((regression_df$volume_m3_ha - mean(regression_df$volume_m3_ha))^2)
-RSS <- sum((regression_df$volume_m3_ha - predictions)^2, na.rm = TRUE)
-pseudo_r_squared_loess <- 1 - (RSS / TSS)
-
-# Plot 2: LOESS with Confidence Interval
-loess_plot <- ggplot(regression_df, aes(x = total_length_m, y = volume_m3_ha)) +
-  geom_point(alpha = 0.2) +
-  geom_smooth(method = "loess", aes(color = "LOESS"), se = TRUE) +
-  geom_hline(aes(yintercept = ref_vol_m3_ha, linetype = "Reference"), color = "#004d00") +
-  labs(
-    title = "Regression of Volume Estimate vs. Transect Length",
-    subtitle = "LOESS smoothing with 95% confidence interval",
-    x = "Total Transect Length (m)",
-    y = "Estimated Volume (m³/ha)"
-  ) +
-  scale_color_manual(
-    name = "Regression Method",
-    values = c("LOESS" = "darkred"),
-    labels = c(sprintf("LOESS (Pseudo R² = %.2f)", pseudo_r_squared_loess))
-  ) +
-  scale_linetype_manual(
-    name = "",
-    values = c("Reference" = "dashed"),
-    labels = c(sprintf("Reference: %.2f m³/ha", ref_vol_m3_ha))
-  ) +
-  theme_bw() +
-  theme(legend.position = "bottom", legend.box = "vertical")
-
-ggsave("regression_loess.png", loess_plot, width = 8, height = 6)
-
 # --- Quantile Regression ---
 # Fit model for the median (tau = 0.5) to get stats
 rq_model_median <- quantreg::rq(volume_m3_ha ~ total_length_m, data = regression_df, tau = 0.5)
@@ -249,7 +180,7 @@ pseudo_r_squared_rq <- 1 - (sum(rq_model_median$rho) / sum(null_model$rho))
 quantile_plot <- ggplot(regression_df, aes(x = total_length_m, y = volume_m3_ha)) +
   geom_point(alpha = 0.2) +
   geom_quantile(quantiles = c(0.05, 0.5, 0.95), aes(color = "Quantiles (0.05, 0.5, 0.95)")) +
-  geom_hline(aes(yintercept = ref_vol_m3_ha, linetype = "Reference"), color = "#004d00") +
+  geom_hline(aes(yintercept = ref_vol_m3_ha, linetype = "Reference"), color = "purple", linewidth = 1.3) +
   labs(
     title = "Regression of Volume Estimate vs. Transect Length",
     subtitle = "Uncertainty shown with Quantile Regression",
@@ -258,7 +189,7 @@ quantile_plot <- ggplot(regression_df, aes(x = total_length_m, y = volume_m3_ha)
   ) +
   scale_color_manual(
     name = "Regression Method",
-    values = c("Quantiles (0.05, 0.5, 0.95)" = "blue"),
+    values = c("Quantiles (0.05, 0.5, 0.95)" = "#004d00"),
     labels = c(sprintf("Quantiles (0.05, 0.5, 0.95)\nPseudo R² (median) = %.2f, p (median) = %.3g", pseudo_r_squared_rq, p_value_rq))
   ) +
   scale_linetype_manual(
