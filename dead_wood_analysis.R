@@ -73,6 +73,26 @@ plot_df <- bind_rows(
   wz_estimates %>% select(volume_m3_ha) %>% mutate(method = "WZ per Line")
 )
 
+# --- Statistical Significance ---
+# One-sample t-test to compare the mean of estimates to the reference value
+ns_ttest <- t.test(ns_estimates$volume_m3_ha, mu = ref_vol_m3_ha)
+wz_ttest <- t.test(wz_estimates$volume_m3_ha, mu = ref_vol_m3_ha)
+
+# Calculate absolute differences from reference for comparison
+ns_mean <- mean(ns_estimates$volume_m3_ha)
+wz_mean <- mean(wz_estimates$volume_m3_ha)
+ns_abs_diff <- abs(ns_mean - ref_vol_m3_ha)
+wz_abs_diff <- abs(wz_mean - ref_vol_m3_ha)
+
+# Determine which method is closer to reference
+closer_method <- ifelse(ns_abs_diff < wz_abs_diff, "NS", "WZ")
+closer_diff <- min(ns_abs_diff, wz_abs_diff)
+farther_method <- ifelse(closer_method == "NS", "WZ", "NS")
+farther_diff <- max(ns_abs_diff, wz_abs_diff)
+
+# Two-sample t-test to compare NS vs WZ estimates
+comparison_ttest <- t.test(ns_estimates$volume_m3_ha, wz_estimates$volume_m3_ha)
+
 # --- DEBUG: Print all transect lengths ---
 cat("--- DEBUG: All transect volume estimates ---\n")
 cat("NS estimates (per square):\n")
@@ -83,41 +103,86 @@ cat("\n")
 
 # --- Plotting ---
 # Define BrBG color palette using consistent colors
-elegant_palette <- c("NS per Square" = BRBG_COLORS$dark_brown, "WZ per Line" = BRBG_COLORS$medium_brown)
+elegant_palette <- c("NS per Square" = BRBG_COLORS$dark_green, "WZ per Line" = BRBG_COLORS$medium_green)
+
+# Create summary text for the plot
+ns_p_value <- ifelse(ns_ttest$p.value < 0.001, "p < 0.001", sprintf("p = %.3f", ns_ttest$p.value))
+wz_p_value <- ifelse(wz_ttest$p.value < 0.001, "p < 0.001", sprintf("p = %.3f", wz_ttest$p.value))
+comparison_p_value <- ifelse(comparison_ttest$p.value < 0.001, "p < 0.001", sprintf("p = %.3f", comparison_ttest$p.value))
+
+summary_text <- paste(
+  sprintf("Statistical Comparison to Reference (%.1f m³/ha):", ref_vol_m3_ha),
+  sprintf("NS: %.1f m³/ha (diff: %.1f, %s)", ns_mean, ns_abs_diff, ns_p_value),
+  sprintf("WZ: %.1f m³/ha (diff: %.1f, %s)", wz_mean, wz_abs_diff, wz_p_value),
+  sprintf("%s method is closer to reference", closer_method),
+  sprintf("NS vs WZ comparison: %s", comparison_p_value),
+  sep = "\n"
+)
 
 violin_plot <- ggplot(plot_df, aes(x = method, y = volume_m3_ha)) +
   stat_ydensity(geom = "violin", aes(fill = method), trim = FALSE, alpha = 0.6, bounds = c(0, Inf)) +
   geom_jitter(width = 0.1, height = 0, alpha = 0.5) +
   # Add a point marker for the reference value on each violin plot
-  geom_point(data = . %>% distinct(method), aes(y = ref_vol_m3_ha, shape = "Reference"), size = 5, color = BRBG_COLORS$dark_green) +
+  geom_point(data = . %>% distinct(method), aes(y = ref_vol_m3_ha, shape = "Reference"), size = 5, color = BRBG_COLORS$dark_brown) +
+  # Add summary text annotation
+  annotate("text", x = 1.5, y = max(plot_df$volume_m3_ha) * 0.8, 
+           label = summary_text, 
+           hjust = 0.5, vjust = 1, size = 3.5, 
+           color = BRBG_COLORS$dark_brown,
+           fontface = "bold",
+           lineheight = 0.9) +
   scale_fill_manual(values = elegant_palette, name = "Method") +
   scale_shape_manual(name = "", values = c("Reference" = 18), labels = c(sprintf("Reference: %.2f m³/ha", ref_vol_m3_ha))) +
   labs(
     title = "Distribution of Volume Estimates vs. Reference Value",
-    subtitle = "Estimates calculated per NS Square and WZ Line",
+    subtitle = "Estimates calculated per NS Square and WZ Line with Statistical Comparison",
     x = "Method",
     y = "Volume (m³/ha)",
     fill = "Method"
   ) +
   theme_bw() +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom",
+        plot.background = element_rect(fill = "white", color = NA),
+        panel.background = element_rect(fill = "white", color = NA))
 
-ggsave("volume_distribution_vs_reference.png", violin_plot, width = 8, height = 7)
+ggsave("volume_distribution_vs_reference.png", violin_plot, width = 8, height = 7, bg = "white")
 
 # --- Statistical Significance ---
 # One-sample t-test to compare the mean of estimates to the reference value
 ns_ttest <- t.test(ns_estimates$volume_m3_ha, mu = ref_vol_m3_ha)
 wz_ttest <- t.test(wz_estimates$volume_m3_ha, mu = ref_vol_m3_ha)
 
-cat("--- Statistical Analysis ---
-")
+# Calculate absolute differences from reference for comparison
+ns_mean <- mean(ns_estimates$volume_m3_ha)
+wz_mean <- mean(wz_estimates$volume_m3_ha)
+ns_abs_diff <- abs(ns_mean - ref_vol_m3_ha)
+wz_abs_diff <- abs(wz_mean - ref_vol_m3_ha)
+
+# Determine which method is closer to reference
+closer_method <- ifelse(ns_abs_diff < wz_abs_diff, "NS", "WZ")
+closer_diff <- min(ns_abs_diff, wz_abs_diff)
+farther_method <- ifelse(closer_method == "NS", "WZ", "NS")
+farther_diff <- max(ns_abs_diff, wz_abs_diff)
+
+# Two-sample t-test to compare NS vs WZ estimates
+comparison_ttest <- t.test(ns_estimates$volume_m3_ha, wz_estimates$volume_m3_ha)
+
+cat("--- Statistical Analysis ---\n")
 cat(sprintf("Reference Volume: %.2f m³/ha\n\n", ref_vol_m3_ha))
+
+cat("Method Comparison to Reference:\n")
+cat(sprintf("NS mean: %.2f m³/ha (diff: %.2f m³/ha)\n", ns_mean, ns_abs_diff))
+cat(sprintf("WZ mean: %.2f m³/ha (diff: %.2f m³/ha)\n", wz_mean, wz_abs_diff))
+cat(sprintf("%s method is closer to reference by %.2f m³/ha\n\n", closer_method, farther_diff - closer_diff))
 
 cat("One-sample t-test: Mean of NS Estimates vs. Reference\n")
 print(ns_ttest)
 
 cat("\nOne-sample t-test: Mean of WZ Estimates vs. Reference\n")
 print(wz_ttest)
+
+cat("\nTwo-sample t-test: NS vs WZ Estimates\n")
+print(comparison_ttest)
 
 # --- Regression Analysis: Volume vs. Transect Length ---
 
@@ -231,7 +296,7 @@ quantile_plot <- ggplot(regression_df, aes(x = total_length_m, y = volume_m3_ha)
   theme_bw() +
   theme(legend.position = "bottom", legend.box = "vertical")
 
-ggsave("regression_quantile.png", quantile_plot, width = 8, height = 7)
+ggsave("regression_quantile.png", quantile_plot, width = 8, height = 7, bg = "white")
 
 
 # --- Cumulative Volume Analysis ---
@@ -459,4 +524,4 @@ if(nrow(uncertainty_threshold) > 0) {
 
 
 # Save the plot
-ggsave("cumulative_volume_plot.png", cumulative_volume_plot, width = 10, height = 7)
+ggsave("cumulative_volume_plot.png", cumulative_volume_plot, width = 10, height = 7, bg = "white")

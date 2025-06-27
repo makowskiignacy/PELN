@@ -190,7 +190,7 @@ cat("\nCreating visualizations...\n")
 
 # 1. Bar plot of volume by group
 p1 <- ggplot(group_volumes, aes(x = factor(`Numer grupy (od lewej)`), y = volume_m3_per_ha)) +
-  geom_bar(stat = "identity", fill = BRBG_COLORS$medium_green, alpha = 0.8, color = BRBG_COLORS$dark_green, linewidth = 0.8) +
+  geom_bar(stat = "identity", fill = BRBG_COLORS$medium_green, color = BRBG_COLORS$dark_green, linewidth = 0.8) +
   geom_text(aes(label = paste0(round(volume_m3_per_ha, 1), "\nm³/ha")), 
             vjust = -0.3, size = 3, fontface = "bold", color = BRBG_COLORS$dark_brown,
             position = position_dodge(width = 0.9)) +
@@ -203,15 +203,15 @@ p1 <- ggplot(group_volumes, aes(x = factor(`Numer grupy (od lewej)`), y = volume
         plot.subtitle = element_text(hjust = 0.5, size = 12, color = BRBG_COLORS$medium_brown),
         axis.title = element_text(size = 12, color = BRBG_COLORS$dark_brown),
         axis.text = element_text(size = 10, color = BRBG_COLORS$dark_brown),
-        panel.background = element_rect(fill = "white", color = NA),
-        plot.background = element_rect(fill = "white", color = NA),
+        panel.background = element_rect(fill = "white", color = "white"),
+        plot.background = element_rect(fill = "white", color = "white"),
         panel.grid.major = element_line(color = "grey90", linewidth = 0.5),
         panel.grid.minor = element_line(color = "grey95", linewidth = 0.3)) +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15)))  # Add space at top for labels
 
 # Add horizontal line for average
 p1 <- p1 + geom_hline(yintercept = mean(group_volumes$volume_m3_per_ha), 
-                      linetype = "dashed", color = BRBG_COLORS$medium_brown, alpha = 0.8, linewidth = 1) +
+                      linetype = "dashed", color = BRBG_COLORS$medium_brown, linewidth = 1) +
   annotate("text", x = 1, y = mean(group_volumes$volume_m3_per_ha), 
            label = paste0("Avg: ", round(mean(group_volumes$volume_m3_per_ha), 1), " m³/ha"), 
            hjust = 0, vjust = -0.5, color = BRBG_COLORS$medium_brown, size = 3.5, fontface = "bold")
@@ -361,17 +361,17 @@ table_data <- group_volumes %>%
 library(gridExtra)
 p5 <- tableGrob(table_data, rows = NULL, 
                 theme = ttheme_default(base_size = 10,
-                                     core = list(bg_params = list(fill = BRBG_COLORS$light_gray, alpha = 0.8),
+                                     core = list(bg_params = list(fill = BRBG_COLORS$light_gray),
                                                 fg_params = list(col = BRBG_COLORS$dark_brown)),
-                                     colhead = list(bg_params = list(fill = BRBG_COLORS$medium_green, alpha = 0.9),
+                                     colhead = list(bg_params = list(fill = BRBG_COLORS$medium_green),
                                                    fg_params = list(col = "white", fontface = "bold"))))
 
 # Save individual plots
-ggsave("van_wagner_volume_by_group.png", p1, width = 10, height = 6, dpi = 300)
-ggsave("van_wagner_ns_wz_transects.png", p1b, width = 12, height = 8, dpi = 300)
-ggsave("van_wagner_volume_vs_logs.png", p2, width = 10, height = 6, dpi = 300)
-ggsave("van_wagner_volume_pie.png", p3, width = 8, height = 8, dpi = 300)
-ggsave("van_wagner_summary_stats.png", p4, width = 10, height = 6, dpi = 300)
+ggsave("van_wagner_volume_by_group.png", p1, width = 10, height = 6, dpi = 300, bg = "white")
+ggsave("van_wagner_ns_wz_transects.png", p1b, width = 12, height = 8, dpi = 300, bg = "white")
+ggsave("van_wagner_volume_vs_logs.png", p2, width = 10, height = 6, dpi = 300, bg = "white")
+ggsave("van_wagner_volume_pie.png", p3, width = 8, height = 8, dpi = 300, bg = "white")
+ggsave("van_wagner_summary_stats.png", p4, width = 10, height = 6, dpi = 300, bg = "white")
 
 # Create combined plot
 combined_plot <- grid.arrange(
@@ -382,10 +382,10 @@ combined_plot <- grid.arrange(
                  gp = gpar(fontsize = 16, fontface = "bold", col = BRBG_COLORS$dark_brown))
 )
 
-ggsave("van_wagner_combined_analysis.png", combined_plot, width = 16, height = 12, dpi = 300)
+ggsave("van_wagner_combined_analysis.png", combined_plot, width = 16, height = 12, dpi = 300, bg = "white")
 
 # Save table as separate plot
-png("van_wagner_results_table.png", width = 800, height = 300, res = 150)
+png("van_wagner_results_table.png", width = 800, height = 300, res = 150, bg = "white")
 grid.draw(p5)
 dev.off()
 
