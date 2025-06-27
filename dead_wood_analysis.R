@@ -31,17 +31,27 @@ ref_vol_m3_ha <- total_ref_vol_m3 / AREA_HA
 
 # --- NS Volume Estimation (per Square) ---
 # The Van Wagner formula V(m³/ha) = (π² * Σdᵢ²[cm²]) / (8 * L[m])
+# Create full grid of all possible squares (1-11) to include empty transects
+ns_full_grid <- tibble(nr_kwadratu = 1:11)
+
 ns_estimates <- ns_df %>%
   mutate(d2 = srednica_w_przecieciu^2) %>%
   group_by(nr_kwadratu) %>%
   summarise(sum_d2 = sum(d2, na.rm = TRUE), .groups = 'drop') %>%
+  right_join(ns_full_grid, by = "nr_kwadratu") %>%
+  mutate(sum_d2 = replace_na(sum_d2, 0)) %>%
   mutate(volume_m3_ha = (pi^2 * sum_d2) / (8 * L_PER_TRANSECT))
 
 # --- WZ Volume Estimation (per Line) ---
+# Create full grid of all possible lines (1-6) to include empty transects
+wz_full_grid <- tibble(nr_linii = 1:6)
+
 wz_estimates <- wz_df %>%
   mutate(d2 = srednica_w_przecieciu^2) %>%
   group_by(nr_linii) %>%
   summarise(sum_d2 = sum(d2, na.rm = TRUE), .groups = 'drop') %>%
+  right_join(wz_full_grid, by = "nr_linii") %>%
+  mutate(sum_d2 = replace_na(sum_d2, 0)) %>%
   mutate(volume_m3_ha = (pi^2 * sum_d2) / (8 * L_PER_TRANSECT))
 
 # --- Data Preparation for Plotting ---
@@ -180,7 +190,7 @@ pseudo_r_squared_rq <- 1 - (sum(rq_model_median$rho) / sum(null_model$rho))
 quantile_plot <- ggplot(regression_df, aes(x = total_length_m, y = volume_m3_ha)) +
   geom_point(alpha = 0.2) +
   geom_quantile(quantiles = c(0.05, 0.5, 0.95), aes(color = "Quantiles (0.05, 0.5, 0.95)")) +
-  geom_hline(aes(yintercept = ref_vol_m3_ha, linetype = "Reference"), color = "purple", linewidth = 1.3) +
+  geom_hline(aes(yintercept = ref_vol_m3_ha, linetype = "Reference"), color = "#7c1f1f", linewidth = 1.3) +
   labs(
     title = "Regression of Volume Estimate vs. Transect Length",
     subtitle = "Uncertainty shown with Quantile Regression",
@@ -201,3 +211,231 @@ quantile_plot <- ggplot(regression_df, aes(x = total_length_m, y = volume_m3_ha)
   theme(legend.position = "bottom", legend.box = "vertical")
 
 ggsave("regression_quantile.png", quantile_plot, width = 8, height = 7)
+
+
+# --- Cumulative Volume Analysis ---
+
+# This analysis calculates the dead wood volume estimate cumulatively,
+# starting from the first transect and progressively adding more.
+# It helps visualize how the estimate stabilizes as more data is included.
+
+# Order transects for a consistent cumulative calculation
+ns_transects_ordered <- all_transects %>%
+  dplyr::filter(dataset == "NS") %>%
+  dplyr::arrange(nr_kwadratu, nr_linii)
+
+wz_transects_ordered <- all_transects %>%
+  dplyr::filter(dataset == "WZ") %>%
+  dplyr::arrange(nr_kwadratu, nr_linii)
+
+# Calculate cumulative volume for NS
+ns_cumulative_df <- ns_transects_ordered %>%
+  dplyr::mutate(
+    cumulative_sum_d2 = cumsum(sum_d2),
+    transect_count = dplyr::row_number(),
+    total_length_m = transect_count * L_PER_TRANSECT,
+    volume_m3_ha = (pi^2 * cumulative_sum_d2) / (8 * total_length_m)
+  ) %>%
+  dplyr::mutate(method = "NS")
+
+# Calculate cumulative volume for WZ
+wz_cumulative_df <- wz_transects_ordered %>%
+  dplyr::mutate(
+    cumulative_sum_d2 = cumsum(sum_d2),
+    transect_count = dplyr::row_number(),
+    total_length_m = transect_count * L_PER_TRANSECT,
+    volume_m3_ha = (pi^2 * cumulative_sum_d2) / (8 * total_length_m)
+  ) %>%
+  dplyr::mutate(method = "WZ")
+
+# --- Combined Cumulative Volume and Uncertainty ---
+
+# Create alternating pattern between NS and WZ transects
+ns_transects_for_alternating <- all_transects %>%
+  dplyr::filter(dataset == "NS") %>%
+  dplyr::arrange(nr_kwadratu, nr_linii)
+
+wz_transects_for_alternating <- all_transects %>%
+  dplyr::filter(dataset == "WZ") %>%
+  dplyr::arrange(nr_kwadratu, nr_linii)
+
+# Create alternating combined dataset
+create_alternating_combined_transects <- function() {
+  max_length <- max(nrow(ns_transects_for_alternating), nrow(wz_transects_for_alternating))
+  combined_alternating <- tibble()
+  
+  for (i in 1:max_length) {
+    # Add NS transect if available
+    if (i <= nrow(ns_transects_for_alternating)) {
+      combined_alternating <- bind_rows(combined_alternating, ns_transects_for_alternating[i, ])
+    }
+    # Add WZ transect if available
+    if (i <= nrow(wz_transects_for_alternating)) {
+      combined_alternating <- bind_rows(combined_alternating, wz_transects_for_alternating[i, ])
+    }
+  }
+  return(combined_alternating)
+}
+
+alternating_transects <- create_alternating_combined_transects()
+
+# Calculate cumulative volume for alternating combined dataset
+combined_cumulative_df <- alternating_transects %>%
+  dplyr::mutate(
+    cumulative_sum_d2 = cumsum(sum_d2),
+    transect_count = dplyr::row_number(),
+    total_length_m = transect_count * L_PER_TRANSECT,
+    volume_m3_ha = (pi^2 * cumulative_sum_d2) / (8 * total_length_m)
+  ) %>%
+  dplyr::mutate(method = "Combined")
+
+# --- Bootstrap for Uncertainty of Combined Estimate ---
+# We simulate different accumulation paths by creating different alternating patterns
+n_bootstrap <- 500 # Number of bootstrap samples.
+
+# Function to get one bootstrap sample with different alternating pattern
+get_bootstrap_alternating_volume <- function(seed) {
+  set.seed(seed)
+  
+  # Shuffle both datasets independently
+  ns_shuffled <- ns_transects_for_alternating[sample(seq_len(nrow(ns_transects_for_alternating))), ]
+  wz_shuffled <- wz_transects_for_alternating[sample(seq_len(nrow(wz_transects_for_alternating))), ]
+  
+  # Create alternating pattern with shuffled data
+  max_length <- max(nrow(ns_shuffled), nrow(wz_shuffled))
+  bootstrap_combined <- tibble()
+  
+  for (i in 1:max_length) {
+    if (i <= nrow(ns_shuffled)) {
+      bootstrap_combined <- bind_rows(bootstrap_combined, ns_shuffled[i, ])
+    }
+    if (i <= nrow(wz_shuffled)) {
+      bootstrap_combined <- bind_rows(bootstrap_combined, wz_shuffled[i, ])
+    }
+  }
+  
+  # Calculate cumulative volume
+  bootstrap_combined %>%
+    dplyr::mutate(
+      cumulative_sum_d2 = cumsum(sum_d2),
+      transect_count = dplyr::row_number(),
+      total_length_m = transect_count * L_PER_TRANSECT,
+      volume_m3_ha = (pi^2 * cumulative_sum_d2) / (8 * total_length_m)
+    ) %>%
+    dplyr::select(total_length_m, volume_m3_ha) %>%
+    dplyr::mutate(bootstrap_run = seed)
+}
+
+# Generate bootstrap replicates
+bootstrap_runs <- purrr::map_df(1:n_bootstrap, ~get_bootstrap_alternating_volume(.x))
+
+# Calculate confidence intervals and relative uncertainty from bootstrap runs
+cumulative_ci <- bootstrap_runs %>%
+  dplyr::group_by(total_length_m) %>%
+  dplyr::summarise(
+    mean_volume = mean(volume_m3_ha, na.rm = TRUE),
+    lower_ci = quantile(volume_m3_ha, 0.025, na.rm = TRUE),
+    upper_ci = quantile(volume_m3_ha, 0.975, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  dplyr::mutate(
+    ci_width = upper_ci - lower_ci,
+    relative_uncertainty = (ci_width / (2 * mean_volume)) * 100  # Half-width as percentage of mean
+  )
+
+# Find where uncertainty drops below 10%
+uncertainty_threshold <- cumulative_ci %>%
+  dplyr::filter(relative_uncertainty <= 10) %>%
+  dplyr::slice(1)
+
+# Join CIs with the main combined cumulative dataframe
+combined_cumulative_df_with_ci <- combined_cumulative_df %>%
+  dplyr::left_join(cumulative_ci, by = "total_length_m")
+
+
+# Combine for plotting
+cumulative_plot_df <- dplyr::bind_rows(ns_cumulative_df, wz_cumulative_df)
+
+# Create segments for the uncertainty heatmap
+create_uncertainty_segments <- function(data) {
+  segments <- data.frame()
+  for(i in 1:(nrow(data)-1)) {
+    segments <- rbind(segments, data.frame(
+      x_start = data$total_length_m[i],
+      x_end = data$total_length_m[i+1],
+      y_lower = data$lower_ci[i],
+      y_upper = data$upper_ci[i],
+      uncertainty = data$relative_uncertainty[i]
+    ))
+  }
+  return(segments)
+}
+
+uncertainty_segments <- create_uncertainty_segments(combined_cumulative_df_with_ci)
+
+# Create the plot with uncertainty heatmap using segments
+cumulative_volume_plot <- ggplot() +
+  # Plot uncertainty as colored segments
+  geom_rect(data = uncertainty_segments, 
+            aes(xmin = x_start, xmax = x_end, ymin = y_lower, ymax = y_upper, fill = uncertainty),
+            alpha = 0.4) +
+  
+  # Plot NS and WZ lines
+  geom_line(data = cumulative_plot_df, aes(x = total_length_m, y = volume_m3_ha, color = method), linewidth = 1.1) +
+  geom_point(data = cumulative_plot_df, aes(x = total_length_m, y = volume_m3_ha, color = method), alpha = 0.6) +
+  
+  # Plot Combined line
+  geom_line(data = combined_cumulative_df_with_ci, aes(x = total_length_m, y = volume_m3_ha, color = "Combined"), linewidth = 1.2) +
+  
+  # Mark the point where uncertainty drops below 10%
+  {if(nrow(uncertainty_threshold) > 0) {
+    geom_vline(xintercept = uncertainty_threshold$total_length_m, linetype = "dotted", color = "#795548", linewidth = 1)
+  }} +
+  {if(nrow(uncertainty_threshold) > 0) {
+    geom_point(data = uncertainty_threshold, aes(x = total_length_m, y = mean_volume), 
+               color = "#7c1f1f", size = 4, shape = 17)
+  }} +
+  
+  # Plot reference line
+  geom_hline(aes(yintercept = ref_vol_m3_ha, linetype = "Reference"), color = "#7c1f1f", linewidth = 1.2) +
+  
+  labs(
+    title = "Cumulative Dead Wood Volume Estimate vs. Transect Length",
+    subtitle = paste0("Alternating NS-WZ sampling pattern with uncertainty heatmap",
+                     if(nrow(uncertainty_threshold) > 0) 
+                       paste0("\nUncertainty ≤10% achieved at ", uncertainty_threshold$total_length_m, "m") 
+                     else "\nUncertainty never drops below 10%"),
+    x = "Total Transect Length (m)",
+    y = "Estimated Volume (m³/ha)",
+    color = "Method",
+    fill = "Relative Uncertainty (%)"
+  ) +
+  scale_color_manual(name = "Method", values = c("NS" = "#2d5016", "WZ" = "#697a87", "Combined" = "#704f44")) +
+  scale_fill_gradient2(name = "Uncertainty (%)", 
+                       low = "#317531", mid = "#a4e1a4", high = "#cd673f", 
+                       midpoint = 15, limits = c(0, NA),
+                       guide = guide_colorbar(title.position = "top")) +
+  scale_linetype_manual(
+    name = "",
+    values = c("Reference" = "dashed"),
+    labels = c(sprintf("Reference: %.2f m³/ha", ref_vol_m3_ha))
+  ) +
+  theme_bw() +
+  theme(legend.position = "bottom", legend.box = "vertical")
+
+# Print summary statistics
+if(nrow(uncertainty_threshold) > 0) {
+  cat(sprintf("\n--- Uncertainty Analysis ---\n"))
+  cat(sprintf("Uncertainty drops below 10%% at transect length: %.0f m\n", uncertainty_threshold$total_length_m))
+  cat(sprintf("Volume estimate at this point: %.2f m³/ha (±%.1f%%)\n", 
+              uncertainty_threshold$mean_volume, uncertainty_threshold$relative_uncertainty))
+} else {
+  cat("\n--- Uncertainty Analysis ---\n")
+  cat("Uncertainty never drops below 10% within the available transect length.\n")
+  min_uncertainty <- min(cumulative_ci$relative_uncertainty, na.rm = TRUE)
+  cat(sprintf("Minimum uncertainty achieved: %.1f%%\n", min_uncertainty))
+}
+
+
+# Save the plot
+ggsave("cumulative_volume_plot.png", cumulative_volume_plot, width = 10, height = 7)
