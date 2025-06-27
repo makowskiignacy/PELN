@@ -15,6 +15,19 @@ ns_df <- ns_df %>% clean_names()
 # --- Constants ---
 AREA_HA <- 0.5
 L_PER_TRANSECT <- 10 # Assuming each transect line is 10m long
+L_PER_TRANSECT_NS <- 50
+L_PER_TRANSECT_WZ <- 100
+
+# --- BrBG Color Palette Definition ---
+# Define consistent BrBG colors for all plots
+BRBG_COLORS <- list(
+  dark_brown = "#543005",
+  medium_brown = "#8c510a", 
+  light_brown = "#bf812d",
+  dark_green = "#003c30",
+  medium_green = "#35978f",
+  light_gray = "#f5f5f5"
+)
 
 # --- Total Reference Volume Calculation (per Hectare) ---
 total_ref_vol_m3 <- ref_df %>%
@@ -40,7 +53,7 @@ ns_estimates <- ns_df %>%
   summarise(sum_d2 = sum(d2, na.rm = TRUE), .groups = 'drop') %>%
   right_join(ns_full_grid, by = "nr_kwadratu") %>%
   mutate(sum_d2 = replace_na(sum_d2, 0)) %>%
-  mutate(volume_m3_ha = (pi^2 * sum_d2) / (8 * L_PER_TRANSECT))
+  mutate(volume_m3_ha = (pi^2 * sum_d2) / (8 * L_PER_TRANSECT_NS))
 
 # --- WZ Volume Estimation (per Line) ---
 # Create full grid of all possible lines (1-6) to include empty transects
@@ -52,7 +65,7 @@ wz_estimates <- wz_df %>%
   summarise(sum_d2 = sum(d2, na.rm = TRUE), .groups = 'drop') %>%
   right_join(wz_full_grid, by = "nr_linii") %>%
   mutate(sum_d2 = replace_na(sum_d2, 0)) %>%
-  mutate(volume_m3_ha = (pi^2 * sum_d2) / (8 * L_PER_TRANSECT))
+  mutate(volume_m3_ha = (pi^2 * sum_d2) / (8 * L_PER_TRANSECT_WZ))
 
 # --- Data Preparation for Plotting ---
 plot_df <- bind_rows(
@@ -60,15 +73,23 @@ plot_df <- bind_rows(
   wz_estimates %>% select(volume_m3_ha) %>% mutate(method = "WZ per Line")
 )
 
+# --- DEBUG: Print all transect lengths ---
+cat("--- DEBUG: All transect volume estimates ---\n")
+cat("NS estimates (per square):\n")
+print(ns_estimates %>% select(nr_kwadratu, volume_m3_ha) %>% arrange(nr_kwadratu))
+cat("\nWZ estimates (per line):\n") 
+print(wz_estimates %>% select(nr_linii, volume_m3_ha) %>% arrange(nr_linii))
+cat("\n")
+
 # --- Plotting ---
-# Define a more elegant color palette
-elegant_palette <- c("NS per Square" = "#004d00", "WZ per Line" = "#697a87") # Dark green and slate grey
+# Define BrBG color palette using consistent colors
+elegant_palette <- c("NS per Square" = BRBG_COLORS$dark_brown, "WZ per Line" = BRBG_COLORS$medium_brown)
 
 violin_plot <- ggplot(plot_df, aes(x = method, y = volume_m3_ha)) +
   stat_ydensity(geom = "violin", aes(fill = method), trim = FALSE, alpha = 0.6, bounds = c(0, Inf)) +
   geom_jitter(width = 0.1, height = 0, alpha = 0.5) +
   # Add a point marker for the reference value on each violin plot
-  geom_point(data = . %>% distinct(method), aes(y = ref_vol_m3_ha, shape = "Reference"), size = 5, color = "black") +
+  geom_point(data = . %>% distinct(method), aes(y = ref_vol_m3_ha, shape = "Reference"), size = 5, color = BRBG_COLORS$dark_green) +
   scale_fill_manual(values = elegant_palette, name = "Method") +
   scale_shape_manual(name = "", values = c("Reference" = 18), labels = c(sprintf("Reference: %.2f m³/ha", ref_vol_m3_ha))) +
   labs(
@@ -188,9 +209,9 @@ pseudo_r_squared_rq <- 1 - (sum(rq_model_median$rho) / sum(null_model$rho))
 
 # Plot 2: Quantile Regression
 quantile_plot <- ggplot(regression_df, aes(x = total_length_m, y = volume_m3_ha)) +
-  geom_point(alpha = 0.2) +
+  geom_point(alpha = 0.2, color = BRBG_COLORS$light_brown) +
   geom_quantile(quantiles = c(0.05, 0.5, 0.95), aes(color = "Quantiles (0.05, 0.5, 0.95)")) +
-  geom_hline(aes(yintercept = ref_vol_m3_ha, linetype = "Reference"), color = "#7c1f1f", linewidth = 1.3) +
+  geom_hline(aes(yintercept = ref_vol_m3_ha, linetype = "Reference"), color = BRBG_COLORS$dark_green, linewidth = 1.3) +
   labs(
     title = "Regression of Volume Estimate vs. Transect Length",
     subtitle = "Uncertainty shown with Quantile Regression",
@@ -199,7 +220,7 @@ quantile_plot <- ggplot(regression_df, aes(x = total_length_m, y = volume_m3_ha)
   ) +
   scale_color_manual(
     name = "Regression Method",
-    values = c("Quantiles (0.05, 0.5, 0.95)" = "#004d00"),
+    values = c("Quantiles (0.05, 0.5, 0.95)" = BRBG_COLORS$dark_brown),
     labels = c(sprintf("Quantiles (0.05, 0.5, 0.95)\nPseudo R² (median) = %.2f, p (median) = %.3g", pseudo_r_squared_rq, p_value_rq))
   ) +
   scale_linetype_manual(
@@ -389,15 +410,15 @@ cumulative_volume_plot <- ggplot() +
   
   # Mark the point where uncertainty drops below 10%
   {if(nrow(uncertainty_threshold) > 0) {
-    geom_vline(xintercept = uncertainty_threshold$total_length_m, linetype = "dotted", color = "#795548", linewidth = 1)
+    geom_vline(xintercept = uncertainty_threshold$total_length_m, linetype = "dotted", color = BRBG_COLORS$medium_brown, linewidth = 1)
   }} +
   {if(nrow(uncertainty_threshold) > 0) {
     geom_point(data = uncertainty_threshold, aes(x = total_length_m, y = mean_volume), 
-               color = "#7c1f1f", size = 4, shape = 17)
+               color = BRBG_COLORS$medium_brown, size = 4, shape = 17)
   }} +
   
   # Plot reference line
-  geom_hline(aes(yintercept = ref_vol_m3_ha, linetype = "Reference"), color = "#7c1f1f", linewidth = 1.2) +
+  geom_hline(aes(yintercept = ref_vol_m3_ha, linetype = "Reference"), color = BRBG_COLORS$dark_green, linewidth = 1.2) +
   
   labs(
     title = "Cumulative Dead Wood Volume Estimate vs. Transect Length",
@@ -410,9 +431,9 @@ cumulative_volume_plot <- ggplot() +
     color = "Method",
     fill = "Relative Uncertainty (%)"
   ) +
-  scale_color_manual(name = "Method", values = c("NS" = "#2d5016", "WZ" = "#697a87", "Combined" = "#704f44")) +
+  scale_color_manual(name = "Method", values = c("NS" = BRBG_COLORS$dark_brown, "WZ" = BRBG_COLORS$medium_brown, "Combined" = BRBG_COLORS$dark_green)) +
   scale_fill_gradient2(name = "Uncertainty (%)", 
-                       low = "#317531", mid = "#a4e1a4", high = "#cd673f", 
+                       low = BRBG_COLORS$medium_green, mid = BRBG_COLORS$light_gray, high = BRBG_COLORS$light_brown, 
                        midpoint = 15, limits = c(0, NA),
                        guide = guide_colorbar(title.position = "top")) +
   scale_linetype_manual(
