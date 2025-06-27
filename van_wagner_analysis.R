@@ -8,6 +8,7 @@ library(ggplot2)
 library(gridExtra)
 library(grid)
 library(RColorBrewer)
+library(tidyr)
 
 # --- BrBG Color Palette Definition ---
 # Define consistent BrBG colors for all plots
@@ -22,6 +23,10 @@ BRBG_COLORS <- list(
 
 # Read the data
 data <- read_csv("data/PELN - transekt liniowy środa.csv")
+
+# Also load NS and WZ data for comparison plots
+ns_data <- read_csv("data/PELN - Van Wagner NS (martwe drewno).csv", locale = locale(decimal_mark = ","))
+wz_data <- read_csv("data/PELN - Van Wagner WZ (martwe drewno).csv", locale = locale(decimal_mark = ","))
 
 # Clean and prepare the data
 # Convert diameter column to numeric, handling comma as decimal separator
@@ -115,6 +120,52 @@ cat(sprintf("Maximum group volume: %.2f m³/ha (Group %d)\n",
             max(group_volumes$volume_m3_per_ha),
             group_volumes$`Numer grupy (od lewej)`[which.max(group_volumes$volume_m3_per_ha)]))
 
+# --- NS and WZ Transect Analysis ---
+cat("\nProcessing NS and WZ transect data...\n")
+
+# Constants for NS and WZ analysis
+L_PER_TRANSECT_NS <- 50
+L_PER_TRANSECT_WZ <- 100
+
+# Debug: Check original column names
+cat("Original NS columns:", paste(colnames(ns_data), collapse = ", "), "\n")
+cat("Original WZ columns:", paste(colnames(wz_data), collapse = ", "), "\n")
+
+# Process NS data (per square) - use original column name
+ns_full_grid <- tibble(nr_kwadratu = 1:11)
+
+ns_estimates <- ns_data %>%
+  rename(nr_kwadratu = `Nr kwadratu`) %>%
+  # Convert diameter from cm to cm² for Van Wagner formula (diameter is in cm, formula expects cm²)
+  mutate(d2 = `Średnica w przecięciu`^2) %>%
+  group_by(nr_kwadratu) %>%
+  summarise(sum_d2 = sum(d2, na.rm = TRUE), .groups = 'drop') %>%
+  right_join(ns_full_grid, by = "nr_kwadratu") %>%
+  mutate(sum_d2 = replace_na(sum_d2, 0)) %>%
+  # Van Wagner formula: V(m³/ha) = (π² * Σd²[cm²]) / (8 * L[m])
+  mutate(volume_m3_ha = (pi^2 * sum_d2) / (8 * L_PER_TRANSECT_NS)) %>%
+  mutate(method = "NS", transect_id = paste0("Square ", nr_kwadratu))
+
+# Process WZ data (per line) - use original column name
+wz_full_grid <- tibble(nr_linii = 1:6)
+
+wz_estimates <- wz_data %>%
+  rename(nr_linii = `Nr linii`) %>%
+  # Convert diameter from cm to cm² for Van Wagner formula (diameter is in cm, formula expects cm²)
+  mutate(d2 = `Średnica w przecięciu`^2) %>%
+  group_by(nr_linii) %>%
+  summarise(sum_d2 = sum(d2, na.rm = TRUE), .groups = 'drop') %>%
+  right_join(wz_full_grid, by = "nr_linii") %>%
+  mutate(sum_d2 = replace_na(sum_d2, 0)) %>%
+  # Van Wagner formula: V(m³/ha) = (π² * Σd²[cm²]) / (8 * L[m])
+  mutate(volume_m3_ha = (pi^2 * sum_d2) / (8 * L_PER_TRANSECT_WZ)) %>%
+  mutate(method = "WZ", transect_id = paste0("Line ", nr_linii))
+
+cat(sprintf("NS estimates summary: %.2f ± %.2f m³/ha (n=%d)\n", 
+            mean(ns_estimates$volume_m3_ha), sd(ns_estimates$volume_m3_ha), nrow(ns_estimates)))
+cat(sprintf("WZ estimates summary: %.2f ± %.2f m³/ha (n=%d)\n", 
+            mean(wz_estimates$volume_m3_ha), sd(wz_estimates$volume_m3_ha), nrow(wz_estimates)))
+
 # Save results to CSV
 write_csv(summary_table, "van_wagner_results_by_group.csv")
 
@@ -141,7 +192,8 @@ cat("\nCreating visualizations...\n")
 p1 <- ggplot(group_volumes, aes(x = factor(`Numer grupy (od lewej)`), y = volume_m3_per_ha)) +
   geom_bar(stat = "identity", fill = BRBG_COLORS$medium_green, alpha = 0.8, color = BRBG_COLORS$dark_green, linewidth = 0.8) +
   geom_text(aes(label = paste0(round(volume_m3_per_ha, 1), "\nm³/ha")), 
-            vjust = -0.5, size = 3.5, fontface = "bold", color = BRBG_COLORS$dark_brown) +
+            vjust = -0.3, size = 3, fontface = "bold", color = BRBG_COLORS$dark_brown,
+            position = position_dodge(width = 0.9)) +
   labs(title = "Dead Wood Volume by Group (Van Wagner Method)",
        subtitle = "Each group surveyed 500m transect",
        x = "Group Number",
@@ -151,14 +203,64 @@ p1 <- ggplot(group_volumes, aes(x = factor(`Numer grupy (od lewej)`), y = volume
         plot.subtitle = element_text(hjust = 0.5, size = 12, color = BRBG_COLORS$medium_brown),
         axis.title = element_text(size = 12, color = BRBG_COLORS$dark_brown),
         axis.text = element_text(size = 10, color = BRBG_COLORS$dark_brown),
-        panel.background = element_rect(fill = BRBG_COLORS$light_gray, color = NA))
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        panel.grid.major = element_line(color = "grey90", linewidth = 0.5),
+        panel.grid.minor = element_line(color = "grey95", linewidth = 0.3)) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15)))  # Add space at top for labels
 
 # Add horizontal line for average
 p1 <- p1 + geom_hline(yintercept = mean(group_volumes$volume_m3_per_ha), 
                       linetype = "dashed", color = BRBG_COLORS$medium_brown, alpha = 0.8, linewidth = 1) +
-  annotate("text", x = Inf, y = mean(group_volumes$volume_m3_per_ha), 
-           label = paste0("Average: ", round(mean(group_volumes$volume_m3_per_ha), 1), " m³/ha"), 
-           hjust = 1.1, vjust = -0.5, color = BRBG_COLORS$medium_brown, size = 3, fontface = "bold")
+  annotate("text", x = 1, y = mean(group_volumes$volume_m3_per_ha), 
+           label = paste0("Avg: ", round(mean(group_volumes$volume_m3_per_ha), 1), " m³/ha"), 
+           hjust = 0, vjust = -0.5, color = BRBG_COLORS$medium_brown, size = 3.5, fontface = "bold")
+
+# 1b. Bar plot of volume by NS squares and WZ lines
+ns_wz_combined <- bind_rows(
+  ns_estimates %>% select(transect_id, volume_m3_ha, method),
+  wz_estimates %>% select(transect_id, volume_m3_ha, method)
+)
+
+p1b <- ggplot(ns_wz_combined, aes(x = reorder(transect_id, volume_m3_ha), y = volume_m3_ha, fill = method)) +
+  geom_bar(stat = "identity", alpha = 0.8, color = "white", linewidth = 0.5) +
+  geom_text(aes(label = round(volume_m3_ha, 1)), 
+            hjust = -0.1, size = 2.5, fontface = "bold", color = BRBG_COLORS$dark_brown) +
+  scale_fill_manual(values = c("NS" = BRBG_COLORS$light_brown, "WZ" = BRBG_COLORS$medium_green)) +
+  coord_flip() +
+  labs(title = "Dead Wood Volume by NS Squares and WZ Lines",
+       subtitle = "Van Wagner method: NS transects 50m, WZ transects 100m",
+       x = "Transect",
+       y = "Volume (m³/ha)",
+       fill = "Method") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold", color = BRBG_COLORS$dark_brown),
+        plot.subtitle = element_text(hjust = 0.5, size = 12, color = BRBG_COLORS$medium_brown),
+        axis.title = element_text(size = 12, color = BRBG_COLORS$dark_brown),
+        axis.text = element_text(size = 9, color = BRBG_COLORS$dark_brown),
+        legend.position = "bottom",
+        legend.title = element_text(color = BRBG_COLORS$dark_brown),
+        legend.text = element_text(color = BRBG_COLORS$dark_brown),
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        panel.grid.major = element_line(color = "grey90", linewidth = 0.5),
+        panel.grid.minor = element_line(color = "grey95", linewidth = 0.3)) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+
+# Add average lines for each method
+ns_avg <- mean(ns_estimates$volume_m3_ha)
+wz_avg <- mean(wz_estimates$volume_m3_ha)
+
+p1b <- p1b + 
+  geom_vline(xintercept = sum(ns_wz_combined$method == "NS") + 0.5, 
+             linetype = "dotted", color = "grey60", alpha = 0.7) +
+  annotate("text", x = sum(ns_wz_combined$method == "NS")/2, y = max(ns_wz_combined$volume_m3_ha) * 0.9, 
+           label = paste0("NS Avg: ", round(ns_avg, 1), " m³/ha"), 
+           color = BRBG_COLORS$medium_brown, size = 3, fontface = "bold") +
+  annotate("text", x = sum(ns_wz_combined$method == "NS") + sum(ns_wz_combined$method == "WZ")/2, 
+           y = max(ns_wz_combined$volume_m3_ha) * 0.9, 
+           label = paste0("WZ Avg: ", round(wz_avg, 1), " m³/ha"), 
+           color = BRBG_COLORS$medium_brown, size = 3, fontface = "bold")
 
 # 2. Bar plot comparing number of logs vs volume
 group_volumes_long <- group_volumes %>%
@@ -188,7 +290,10 @@ p2 <- ggplot(group_volumes_long, aes(x = Group)) +
         legend.position = "bottom",
         legend.title = element_text(color = BRBG_COLORS$dark_brown),
         legend.text = element_text(color = BRBG_COLORS$dark_brown),
-        panel.background = element_rect(fill = BRBG_COLORS$light_gray, color = NA))
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        panel.grid.major = element_line(color = "grey90", linewidth = 0.5),
+        panel.grid.minor = element_line(color = "grey95", linewidth = 0.3))
 
 # 3. Pie chart of volume contribution by group
 # Create BrBG palette for groups
@@ -206,7 +311,9 @@ p3 <- ggplot(group_volumes, aes(x = "", y = volume_m3_per_ha,
   theme_void() +
   theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold", color = BRBG_COLORS$dark_brown),
         legend.title = element_text(color = BRBG_COLORS$dark_brown),
-        legend.text = element_text(color = BRBG_COLORS$dark_brown)) +
+        legend.text = element_text(color = BRBG_COLORS$dark_brown),
+        plot.background = element_rect(fill = "white", color = NA),
+        plot.margin = margin(20, 20, 20, 20, "pt")) +
   geom_text(aes(label = paste0("Group ", `Numer grupy (od lewej)`, "\n", 
                                round(volume_m3_per_ha, 1), " m³/ha")), 
             position = position_stack(vjust = 0.5), size = 3, 
@@ -235,7 +342,10 @@ p4 <- ggplot(stats_df, aes(x = reorder(Metric, Value), y = Value)) +
   theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold", color = BRBG_COLORS$dark_brown),
         axis.title = element_text(size = 12, color = BRBG_COLORS$dark_brown),
         axis.text = element_text(size = 10, color = BRBG_COLORS$dark_brown),
-        panel.background = element_rect(fill = BRBG_COLORS$light_gray, color = NA))
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        panel.grid.major = element_line(color = "grey90", linewidth = 0.5),
+        panel.grid.minor = element_line(color = "grey95", linewidth = 0.3))
 
 # 5. Detailed comparison table plot
 table_data <- group_volumes %>%
@@ -258,13 +368,14 @@ p5 <- tableGrob(table_data, rows = NULL,
 
 # Save individual plots
 ggsave("van_wagner_volume_by_group.png", p1, width = 10, height = 6, dpi = 300)
+ggsave("van_wagner_ns_wz_transects.png", p1b, width = 12, height = 8, dpi = 300)
 ggsave("van_wagner_volume_vs_logs.png", p2, width = 10, height = 6, dpi = 300)
 ggsave("van_wagner_volume_pie.png", p3, width = 8, height = 8, dpi = 300)
 ggsave("van_wagner_summary_stats.png", p4, width = 10, height = 6, dpi = 300)
 
 # Create combined plot
 combined_plot <- grid.arrange(
-  p1, p2,
+  p1, p1b,
   p3, p4,
   ncol = 2,
   top = textGrob("Van Wagner Dead Wood Volume Analysis - Complete Results", 
@@ -280,6 +391,7 @@ dev.off()
 
 cat("\nPlots saved:\n")
 cat("- van_wagner_volume_by_group.png\n")
+cat("- van_wagner_ns_wz_transects.png\n")
 cat("- van_wagner_volume_vs_logs.png\n")
 cat("- van_wagner_volume_pie.png\n")
 cat("- van_wagner_summary_stats.png\n")
